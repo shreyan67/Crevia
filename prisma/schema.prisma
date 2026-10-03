@@ -1,0 +1,92 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  email     String?
+  role      String   @default("CUSTOMER") // "CUSTOMER" or "ADMIN"
+  orders    Order[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Product {
+  id          String           @id @default(cuid())
+  name        String
+  description String
+  basePrice   Float
+  categoryId  String
+  category    Category         @relation(fields: [categoryId], references: [id])
+  images      String           // Storing as JSON string or comma-separated URLs
+  variants    ProductVariant[]
+  orderItems  OrderItem[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model ProductVariant {
+  id              String   @id @default(cuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+  weight          Float?   // in kg, e.g. 0.5, 1, 1.5
+  flavor          String?  // e.g. "Chocolate", "Vanilla"
+  priceAdjustment Float    @default(0) // Added to base price
+}
+
+model Order {
+  id             String      @id @default(cuid())
+  userId         String?
+  user           User?       @relation(fields: [userId], references: [id])
+  
+  customerName   String
+  customerPhone  String
+  customerEmail  String
+  deliveryAddress String
+  deliveryPincode String
+
+  totalAmount    Float
+  status         String      @default("PENDING") // PENDING, CONFIRMED, BAKING, OUT_FOR_DELIVERY, DELIVERED
+  
+  deliveryDate   DateTime
+  deliverySlot   String      // e.g., "10:00 AM - 12:00 PM"
+  deliveryPin    String      // 4-digit code
+  
+  paymentMethod  String      @default("ONLINE") // ONLINE, COD
+  paymentStatus  String      @default("PENDING") // PENDING, PAID, FAILED, COD_PENDING
+  paymentId      String?
+  razorpayOrderId String?
+  
+  items          OrderItem[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float    // Price at the time of order
+  message   String?  // Custom message on cake
+}
