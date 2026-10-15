@@ -1,24 +1,24 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChefHat, TrendingUp, ShoppingBag, Banknote } from "lucide-react";
-import { getActiveOrders } from "@/app/actions/order";
+import { ChefHat, TrendingUp, ShoppingBag, Banknote, Zap } from "lucide-react";
+import { getDashboardSummary } from "@/app/actions/order";
 
 export default async function AdminDashboard() {
-  const orders = await getActiveOrders();
-  
-  // Calculate dynamic stats
-  const todaysRevenue = orders
-    .filter(o => o.paymentStatus === "PAID" || o.paymentMethod === "COD")
-    .reduce((sum, o) => sum + o.totalAmount, 0);
-    
-  const pendingOrders = orders.filter(o => o.status === "CONFIRMED" || o.status === "BAKING");
-  const readyOrders = orders.filter(o => o.status === "READY_FOR_DELIVERY");
-  const recentOrders = orders.slice(0, 5); // top 5
+  const summary = await getDashboardSummary();
+  const { todaysRevenue, pendingBakingCount, readyOrdersCount, recentOrders, fromCache } = summary;
 
   return (
     <div className="p-8 space-y-8 h-full overflow-y-auto">
-      <div>
-        <h1 className="font-serif text-3xl font-bold text-foreground">Overview</h1>
-        <p className="text-muted-foreground mt-1">Welcome back, team! Here's what's happening at Crévia today.</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="font-serif text-3xl font-bold text-foreground">Overview</h1>
+          <p className="text-muted-foreground mt-1">Welcome back, team! Here's what's happening at Crévia today.</p>
+        </div>
+        {fromCache && (
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+            <Zap className="w-3.5 h-3.5" />
+            <span>Redis Cache Active (Sub-millisecond)</span>
+          </div>
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -34,14 +34,14 @@ export default async function AdminDashboard() {
             </p>
           </CardContent>
         </Card>
-        
+
         <Card className="rounded-2xl border-border/50 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Pending Baking</CardTitle>
             <ShoppingBag className="w-4 h-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{pendingOrders.length}</div>
+            <div className="text-2xl font-bold">{pendingBakingCount}</div>
             <p className="text-xs text-muted-foreground mt-1">Needs to be baked</p>
           </CardContent>
         </Card>
@@ -52,7 +52,7 @@ export default async function AdminDashboard() {
             <ChefHat className="w-4 h-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{readyOrders.length}</div>
+            <div className="text-2xl font-bold">{readyOrdersCount}</div>
             <p className="text-xs text-muted-foreground mt-1">Awaiting dispatch</p>
           </CardContent>
         </Card>

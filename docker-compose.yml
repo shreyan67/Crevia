@@ -1,0 +1,72 @@
+services:
+  # Next.js 16 Web Application
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crevia_web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/crevia?schema=public
+      - REDIS_URL=redis://redis:6379
+      - NEXT_PUBLIC_RAZORPAY_KEY_ID=${NEXT_PUBLIC_RAZORPAY_KEY_ID:-rzp_test_mock123}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-rzp_test_mock123}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-mock_secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crevia_network
+
+  # PostgreSQL 16 Relational Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: crevia_postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=crevia
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crevia"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crevia_network
+
+  # Redis 7 In-Memory Cache
+  redis:
+    image: redis:7-alpine
+    container_name: crevia_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - crevia_network
+
+networks:
+  crevia_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

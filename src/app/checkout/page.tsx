@@ -53,7 +53,7 @@ export default function CheckoutPage() {
       }
 
       // If using Mock Mode because keys are missing
-      if (response.razorpayOrderId.startsWith("order_mock_")) {
+      if (response.razorpayOrderId && response.razorpayOrderId.startsWith("order_mock_")) {
         alert("TEST MODE: Razorpay Keys not found in .env. Simulating successful payment...");
         setTimeout(async () => {
           await verifyPayment(response.orderId, "pay_mock_" + Math.random().toString(36).substring(7), "mock_sig");
@@ -70,7 +70,7 @@ export default function CheckoutPage() {
         currency: "INR",
         name: "Premium Bakery",
         description: "Cake Order",
-        order_id: response.razorpayOrderId,
+        order_id: response.razorpayOrderId || "",
         handler: async function (res: any) {
           const verified = await verifyPayment(
             response.orderId,

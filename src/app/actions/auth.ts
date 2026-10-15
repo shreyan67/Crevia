@@ -1,14 +1,22 @@
 "use server";
 
-import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { RequestOtpSchema, VerifyOtpSchema, type ActionResult } from "@/lib/validations";
 
-const adapter = new PrismaBetterSqlite3({ url: "file:./dev.db" });
-const prisma = new PrismaClient({ adapter });
 
-export async function sendOtp(name: string, phone: string) {
+
+export async function sendOtp(name: string, phone: string): Promise<ActionResult<{ pending: boolean; devOtp?: string }>> {
+  // Validate request parameters with Zod
+  const validation = RequestOtpSchema.safeParse({ name, phone });
+  if (!validation.success) {
+    return {
+      success: false,
+      message: validation.error.issues[0]?.message || "Invalid name or phone number",
+    };
+  }
+
   try {
     // Generate 4-digit mock OTP
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -16,58 +24,67 @@ export async function sendOtp(name: string, phone: string) {
 
     // Store pending auth data in a temporary cookie (valid for 5 mins)
     const cookieStore = await cookies();
-    cookieStore.set("pending_auth", JSON.stringify({ name, phone, otp }), {
+    cookieStore.set("pending_auth", JSON.stringify({ name: validation.data.name, phone: validation.data.phone, otp }), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      maxAge: 5 * 60, 
+      maxAge: 5 * 60,
       path: "/",
     });
 
-    return { success: true };
+    return { success: true, data: { pending: true, devOtp: process.env.NODE_ENV !== "production" ? otp : undefined } };
   } catch (err) {
     console.error(err);
     return { success: false, message: "Failed to send OTP." };
   }
 }
 
-export async function verifyOtp(enteredOtp: string) {
+export async function verifyOtp(enteredOtp: string): Promise<ActionResult<{ userId: string }>> {
+  // Validate OTP format with Zod
+  const validation = VerifyOtpSchema.safeParse({ enteredOtp });
+  if (!validation.success) {
+    return {
+      success: false,
+      message: validation.error.issues[0]?.message || "Invalid OTP format",
+    };
+  }
+
   try {
     const cookieStore = await cookies();
     const pendingAuthStr = cookieStore.get("pending_auth")?.value;
-    
+
     if (!pendingAuthStr) {
       return { success: false, message: "OTP expired or invalid." };
     }
 
     const { name, phone, otp } = JSON.parse(pendingAuthStr);
 
-    if (enteredOtp !== otp) {
+    if (validation.data.enteredOtp !== otp) {
       return { success: false, message: "Incorrect OTP." };
     }
 
     // OTP matched! Create or find user
     let user = await prisma.user.findUnique({
-      where: { phone }
+      where: { phone },
     });
 
     if (!user) {
       user = await prisma.user.create({
-        data: { name, phone }
+        data: { name, phone },
       });
     }
 
-    // Set real auth session
+    // Set real auth session (valid 30 days)
     cookieStore.set("auth_session", user.id, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: 60 * 60 * 24 * 30,
       path: "/",
     });
-    
-    // Clear pending
+
+    // Clear pending auth
     cookieStore.delete("pending_auth");
 
-    return { success: true };
+    return { success: true, data: { userId: user.id } };
   } catch (err) {
     console.error(err);
     return { success: false, message: "Verification failed." };
@@ -86,7 +103,7 @@ export async function getUser() {
   if (!userId) return null;
 
   const user = await prisma.user.findUnique({
-    where: { id: userId }
+    where: { id: userId },
   });
 
   return user;
