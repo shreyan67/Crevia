@@ -152,3 +152,48 @@ export async function loginWithGoogle(profile: {
     return { success: false, message: "Google authentication failed" };
   }
 }
+
+
+export async function updateUserProfile(data: {
+  name?: string;
+  phone?: string;
+  address?: string;
+  pincode?: string;
+}): Promise<ActionResult<{ user: any }>> {
+  const cookieStore = await cookies();
+  const userId = cookieStore.get("auth_session")?.value;
+  if (!userId) return { success: false, message: "Unauthorized. Please log in." };
+
+  try {
+    const updateData: any = {};
+    if (data.name?.trim()) updateData.name = data.name.trim();
+    if (data.phone?.trim()) updateData.phone = data.phone.trim();
+    if (data.address?.trim()) updateData.address = data.address.trim();
+    if (data.pincode?.trim()) updateData.pincode = data.pincode.trim();
+
+    let updatedUser;
+    try {
+      updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
+    } catch (err: any) {
+      if (err?.code === "P2002") {
+        delete updateData.phone;
+        updatedUser = await prisma.user.update({
+          where: { id: userId },
+          data: updateData,
+        });
+      } else {
+        throw err;
+      }
+    }
+
+    revalidatePath("/my-orders");
+    revalidatePath("/checkout");
+    return { success: true, data: { user: updatedUser } };
+  } catch (error) {
+    console.error("[updateUserProfile] Error:", error);
+    return { success: false, message: "Failed to update profile." };
+  }
+}

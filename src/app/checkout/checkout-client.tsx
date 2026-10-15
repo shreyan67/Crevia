@@ -2,12 +2,12 @@
 
 import { useCartStore } from "@/store/cart";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Wallet, Banknote, Calendar, Clock, User, CheckCircle2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Wallet, Banknote, Calendar, Clock, CheckCircle2, ShieldCheck, MapPin } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
-import { createOrder, verifyPayment } from "@/app/actions/order";
+import { createOrder, verifyPayment, deleteUnpaidOrder } from "@/app/actions/order";
 
 export interface LoggedInUser {
   id: string;
@@ -15,6 +15,8 @@ export interface LoggedInUser {
   phone?: string | null;
   email?: string | null;
   avatar?: string | null;
+  address?: string | null;
+  pincode?: string | null;
 }
 
 export default function CheckoutClient({ user }: { user: LoggedInUser }) {
@@ -92,6 +94,13 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
         name: "Crévia Patisserie",
         description: "Artisanal Cake Order",
         order_id: response.razorpayOrderId || "",
+        modal: {
+          ondismiss: async function () {
+            console.log("Razorpay checkout modal closed. Deleting unpaid draft order:", response.orderId);
+            await deleteUnpaidOrder(response.orderId);
+            setLoading(false);
+          },
+        },
         handler: async function (res: any) {
           const verified = await verifyPayment(
             response.orderId,
@@ -107,9 +116,9 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
           }
         },
         prefill: {
-          name: user.name || "",
-          email: user.email || "",
-          contact: user.phone || "",
+          name: (formData.get("customerName") as string) || user.name || "",
+          email: (formData.get("customerEmail") as string) || user.email || "",
+          contact: (formData.get("customerPhone") as string) || user.phone || "",
         },
         theme: {
           color: "#b45309",
@@ -118,8 +127,10 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
 
       const paymentObject = new (window as any).Razorpay(options);
       paymentObject.open();
-      paymentObject.on("payment.failed", function (resp: any) {
-        alert("Payment was unsuccessful: " + resp.error.description);
+      paymentObject.on("payment.failed", async function (resp: any) {
+        console.warn("Payment failed or cancelled:", resp);
+        await deleteUnpaidOrder(response.orderId);
+        alert("Payment was unsuccessful or cancelled: " + (resp.error?.description || "Transaction incomplete"));
         setLoading(false);
       });
     } catch (err: any) {
@@ -156,11 +167,11 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
           </Link>
 
           {/* Authenticated User Status Bar */}
-          <div className="mb-8 p-4 rounded-2xl bg-card border border-border/80 flex items-center justify-between">
+          <div className="mb-8 p-4 rounded-2xl bg-card border border-border/80 flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
+              <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold overflow-hidden border border-primary/20">
                 {user.avatar ? (
-                  <img src={user.avatar} alt={user.name} className="w-full h-full rounded-full object-cover" />
+                  <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                 ) : (
                   user.name.charAt(0).toUpperCase()
                 )}
@@ -172,7 +183,10 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
                     <CheckCircle2 className="w-3 h-3" /> Logged In
                   </span>
                 </div>
-                <p className="text-xs text-muted-foreground">{user.email || user.phone || "Active Customer"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {user.email || user.phone || "Active Customer"}
+                  {user.address ? ` • Using saved delivery address` : " • Address will be saved to your profile"}
+                </p>
               </div>
             </div>
             <span className="text-xs text-muted-foreground flex items-center gap-1">
@@ -207,7 +221,7 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
                         type="tel"
                         defaultValue={user.phone || ""}
                         className="w-full bg-card border border-border rounded-xl px-4 py-3 focus:outline-none focus:border-primary transition-all text-sm"
-                        placeholder="+91 9876543210"
+                        placeholder="9876543210"
                       />
                     </div>
                     <div className="space-y-2 md:col-span-2">
@@ -226,7 +240,14 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
 
                 {/* Delivery Address & Schedule */}
                 <section>
-                  <h2 className="font-serif text-2xl font-bold text-foreground mb-6">Delivery Address & Schedule</h2>
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="font-serif text-2xl font-bold text-foreground">Delivery Address & Schedule</h2>
+                    {user.address && (
+                      <span className="text-xs text-primary flex items-center gap-1 font-medium bg-primary/10 px-2.5 py-1 rounded-full">
+                        <MapPin className="w-3 h-3" /> Auto-Filled from Profile
+                      </span>
+                    )}
+                  </div>
                   <div className="grid md:grid-cols-2 gap-6">
                     <div className="space-y-2 md:col-span-2">
                       <label className="text-sm font-medium text-foreground">Street Address / Flat / Society</label>
@@ -234,6 +255,7 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
                         name="deliveryAddress"
                         required
                         type="text"
+                        defaultValue={user.address || ""}
                         className="w-full bg-card border border-border rounded-xl px-4 py-3 focus:outline-none focus:border-primary transition-all text-sm"
                         placeholder="House No 42, Green Avenue, MG Road"
                       />
@@ -245,6 +267,7 @@ export default function CheckoutClient({ user }: { user: LoggedInUser }) {
                         required
                         type="text"
                         maxLength={6}
+                        defaultValue={user.pincode || ""}
                         className="w-full bg-card border border-border rounded-xl px-4 py-3 focus:outline-none focus:border-primary transition-all text-sm"
                         placeholder="560001"
                       />

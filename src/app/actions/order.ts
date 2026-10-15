@@ -8,8 +8,6 @@ import crypto from "crypto";
 import { CreateOrderSchema } from "@/lib/validations";
 import { getCache, setCache, invalidateDashboardCache, CACHE_KEYS } from "@/lib/redis";
 
-
-
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_mock123",
   key_secret: process.env.RAZORPAY_KEY_SECRET || "mock_secret",
@@ -38,6 +36,7 @@ export interface DashboardSummary {
 
 /**
  * Creates an order with strict Zod validation, PIN generation, and Redis cache invalidation.
+ * Unpaid online orders start with status: "PENDING_PAYMENT" so they never appear as confirmed.
  */
 export async function createOrder(rawData: any) {
   const cookieStore = await cookies();
@@ -55,9 +54,11 @@ export async function createOrder(rawData: any) {
   }
 
   const data = validation.data;
+  const isCOD = data.paymentMethod === "COD";
   const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
 
   try {
+    // Initial status: COD is immediately CONFIRMED, whereas online payments start as PENDING_PAYMENT
     const order = await prisma.order.create({
       data: {
         userId: userId,
@@ -70,15 +71,60 @@ export async function createOrder(rawData: any) {
         deliveryDate: new Date(data.deliveryDate),
         deliverySlot: data.deliverySlot,
         paymentMethod: data.paymentMethod,
-        paymentStatus: data.paymentMethod === "COD" ? "COD_PENDING" : "PAYMENT_PENDING",
+        paymentStatus: isCOD ? "COD_PENDING" : "PAYMENT_PENDING",
         deliveryPin: deliveryPin,
-        status: "CONFIRMED",
+        status: isCOD ? "CONFIRMED" : "PENDING_PAYMENT",
       },
     });
 
+    // Connect order items if product exists
+    if (data.items && data.items.length > 0) {
+      for (const item of data.items) {
+        try {
+          const prod = await prisma.product.findUnique({ where: { id: item.id } });
+          if (prod) {
+            await prisma.orderItem.create({
+              data: {
+                orderId: order.id,
+                productId: prod.id,
+                quantity: item.quantity,
+                price: item.price,
+                message: item.message,
+              },
+            });
+          }
+        } catch (itemErr) {
+          console.warn("Could not attach order item:", itemErr);
+        }
+      }
+    }
+
+    // Persist customer profile and delivery address on the User record
+    try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          name: data.customerName,
+          phone: data.customerPhone,
+          address: data.deliveryAddress,
+          pincode: data.deliveryPincode,
+        },
+      });
+    } catch (userErr: any) {
+      // In case of unique constraint conflict on phone, still persist address and name
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          name: data.customerName,
+          address: data.deliveryAddress,
+          pincode: data.deliveryPincode,
+        },
+      }).catch((e) => console.warn("Failed to persist user profile details:", e));
+    }
+
     let razorpayOrderId = null;
 
-    if (data.paymentMethod !== "COD") {
+    if (!isCOD) {
       try {
         if (!process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock123") {
           // Mock mode
@@ -98,11 +144,13 @@ export async function createOrder(rawData: any) {
         });
       } catch (err) {
         console.error("Razorpay order creation failed. Ensure keys are in .env", err);
+        // Clean up the created order if Razorpay fails immediately
+        await prisma.order.delete({ where: { id: order.id } }).catch(() => {});
         throw new Error("Razorpay API Key missing or invalid. Please check .env file.");
       }
     }
 
-    // Explicitly invalidate Redis dashboard cache
+    // Invalidate Redis dashboard cache
     await invalidateDashboardCache();
 
     revalidatePath("/admin");
@@ -120,6 +168,9 @@ export async function createOrder(rawData: any) {
   }
 }
 
+/**
+ * Verifies online payment signature and promotes order from PENDING_PAYMENT to CONFIRMED.
+ */
 export async function verifyPayment(orderId: string, paymentId: string, signature: string) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order || !order.razorpayOrderId) return false;
@@ -128,11 +179,16 @@ export async function verifyPayment(orderId: string, paymentId: string, signatur
   if (order.razorpayOrderId.startsWith("order_mock_")) {
     await prisma.order.update({
       where: { id: orderId },
-      data: { paymentStatus: "PAID", paymentId: paymentId },
+      data: {
+        status: "CONFIRMED",
+        paymentStatus: "PAID",
+        paymentId: paymentId,
+      },
     });
     await invalidateDashboardCache();
     revalidatePath(`/orders/${orderId}`);
     revalidatePath("/admin");
+    revalidatePath("/my-orders");
     return true;
   }
 
@@ -148,6 +204,7 @@ export async function verifyPayment(orderId: string, paymentId: string, signatur
     await prisma.order.update({
       where: { id: orderId },
       data: {
+        status: "CONFIRMED",
         paymentStatus: "PAID",
         paymentId: paymentId,
       },
@@ -155,10 +212,50 @@ export async function verifyPayment(orderId: string, paymentId: string, signatur
     await invalidateDashboardCache();
     revalidatePath(`/orders/${orderId}`);
     revalidatePath("/admin");
+    revalidatePath("/my-orders");
     return true;
   }
 
   return false;
+}
+
+/**
+ * Deletes an order that was canceled or dismissed before payment was completed.
+ * Only orders in PENDING_PAYMENT / unpaid state owned by the authenticated user can be deleted.
+ */
+export async function deleteUnpaidOrder(orderId: string) {
+  try {
+    const cookieStore = await cookies();
+    const userId = cookieStore.get("auth_session")?.value;
+    if (!userId || !orderId) return { success: false, message: "Unauthorized or missing orderId" };
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) return { success: true }; // Already deleted
+
+    // Only delete if it belongs to this user and is unpaid / not COD
+    if (
+      order.userId === userId &&
+      (order.status === "PENDING_PAYMENT" || order.paymentStatus === "PAYMENT_PENDING") &&
+      order.paymentMethod !== "COD"
+    ) {
+      await prisma.order.delete({
+        where: { id: orderId },
+      });
+
+      await invalidateDashboardCache();
+      revalidatePath("/my-orders");
+      revalidatePath("/admin");
+      return { success: true };
+    }
+
+    return { success: false, message: "Order cannot be deleted" };
+  } catch (error) {
+    console.error("[deleteUnpaidOrder] Error:", error);
+    return { success: false, message: "Failed to delete unpaid order" };
+  }
 }
 
 export async function getOrder(id: string) {
@@ -213,7 +310,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 }
 
 /**
- * Paginated order query helper with offset & limit support
+ * Paginated order query helper with offset & limit support.
+ * Excludes unpaid pending orders for customer views so they never appear in "My Orders".
  */
 export async function getPaginatedOrders(params: {
   page?: number;
@@ -226,7 +324,15 @@ export async function getPaginatedOrders(params: {
   const skip = (page - 1) * limit;
 
   const whereClause: any = {};
-  if (params.userId) whereClause.userId = params.userId;
+  if (params.userId) {
+    whereClause.userId = params.userId;
+    // Unpaid/pending orders must NEVER appear in My Orders!
+    whereClause.status = { not: "PENDING_PAYMENT" };
+    whereClause.OR = [
+      { paymentStatus: "PAID" },
+      { paymentMethod: "COD" },
+    ];
+  }
   if (params.status) whereClause.status = params.status;
 
   const [orders, totalCount] = await Promise.all([
@@ -235,6 +341,13 @@ export async function getPaginatedOrders(params: {
       orderBy: { createdAt: "desc" },
       skip,
       take: limit,
+      include: {
+        items: {
+          include: {
+            product: true,
+          },
+        },
+      },
     }),
     prisma.order.count({ where: whereClause }),
   ]);
