@@ -116,7 +116,7 @@ export async function loginWithGoogle(profile: {
 }): Promise<ActionResult<{ userId: string }>> {
   try {
     const email = profile.email.toLowerCase().trim();
-    let user = await prisma.user.findUnique({
+    let user = await prisma.user.findFirst({
       where: { email },
     });
 
