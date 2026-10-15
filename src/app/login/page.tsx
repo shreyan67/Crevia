@@ -77,47 +77,9 @@ function LoginForm() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = () => {
     setGoogleLoading(true);
-
-    // In local development, if Google client ID is not configured, offer 1-click test sign-in
-    try {
-      const response = await fetch("/api/auth/google");
-      if (response.redirected) {
-        // If it redirected back to login with notice, simulate dev sign-in
-        if (response.url.includes("google_keys_needed")) {
-          const testName = prompt("Enter your name for Google Sign-In test:", "Shreyan Acharjee");
-          if (!testName) {
-            setGoogleLoading(false);
-            return;
-          }
-          const testEmail = prompt("Enter test Google email:", "shreyan@example.com");
-          if (!testEmail) {
-            setGoogleLoading(false);
-            return;
-          }
-
-          const res = await loginWithGoogle({
-            name: testName,
-            email: testEmail,
-            avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=200&auto=format&fit=crop",
-          });
-
-          if (res.success) {
-            router.push(callbackUrl);
-            router.refresh();
-            return;
-          }
-        } else {
-          window.location.href = response.url;
-          return;
-        }
-      }
-    } catch {
-      window.location.href = "/api/auth/google";
-    } finally {
-      setGoogleLoading(false);
-    }
+    window.location.href = "/api/auth/google";
   };
 
   if (step === "otp") {
