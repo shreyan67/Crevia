@@ -41,7 +41,11 @@ export interface DashboardSummary {
  */
 export async function createOrder(rawData: any) {
   const cookieStore = await cookies();
-  const userId = cookieStore.get("auth_session")?.value || null;
+  const userId = cookieStore.get("auth_session")?.value;
+
+  if (!userId) {
+    throw new Error("Authentication required. Please log in before placing an order.");
+  }
 
   // Validate input via Zod
   const validation = CreateOrderSchema.safeParse(rawData);
