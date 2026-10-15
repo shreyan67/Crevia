@@ -1,216 +1,271 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, use } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Star, Truck, ShieldCheck, Heart, ArrowLeft } from "lucide-react";
+import { Star, Truck, ShieldCheck, Heart, ArrowLeft, Cake, Sparkles, Check } from "lucide-react";
 import Link from "next/link";
 import { useCartStore } from "@/store/cart";
+import { getProductById, type ProductWithDetails } from "@/app/actions/product";
 
-const FLAVORS = [
-  { id: "chocolate", label: "Belgian Chocolate", price: 0 },
-  { id: "red-velvet", label: "Red Velvet", price: 50 },
-  { id: "vanilla", label: "Classic Vanilla", price: 0 },
-  { id: "butterscotch", label: "Butterscotch", price: 0 },
+const DEFAULT_FLAVORS = [
+  { id: "classic", label: "Classic Signature", price: 0 },
+  { id: "dark-chocolate", label: "70% Belgian Dark Truffle", price: 100 },
+  { id: "salted-caramel", label: "Gourmet Salted Caramel", price: 80 },
+  { id: "red-velvet", label: "Velvet Cream Cheese", price: 120 },
 ];
 
-const SIZES = [
-  { id: "0.5", label: "0.5 kg", price: 699 },
-  { id: "1", label: "1 kg", price: 1299 },
-  { id: "1.5", label: "1.5 kg", price: 1899 },
-  { id: "2", label: "2 kg", price: 2399 },
+const DEFAULT_WEIGHTS = [
+  { id: "0.5", label: "0.5 kg (Serves 3-4)", multiplier: 0.65 },
+  { id: "1.0", label: "1.0 kg (Serves 6-8)", multiplier: 1.0 },
+  { id: "1.5", label: "1.5 kg (Serves 10-12)", multiplier: 1.45 },
+  { id: "2.0", label: "2.0 kg (Serves 14-16)", multiplier: 1.85 },
 ];
 
-export default function ProductPage() {
-  const [selectedFlavor, setSelectedFlavor] = useState(FLAVORS[0]);
-  const [selectedSize, setSelectedSize] = useState(SIZES[0]);
+export default function ProductDetailPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const resolvedParams = use(params);
+  const productId = resolvedParams.slug;
+
+  const [product, setProduct] = useState<ProductWithDetails | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedWeight, setSelectedWeight] = useState(DEFAULT_WEIGHTS[1]); // Default 1.0 kg
+  const [selectedFlavor, setSelectedFlavor] = useState(DEFAULT_FLAVORS[0]);
   const [message, setMessage] = useState("");
-  const [date, setDate] = useState("");
-  const [timeSlot, setTimeSlot] = useState("");
-  
+  const [isEggless, setIsEggless] = useState(false);
+  const [added, setAdded] = useState(false);
+
   const { addItem } = useCartStore();
 
-  const totalPrice = selectedSize.price + selectedFlavor.price;
+  useEffect(() => {
+    async function loadProduct() {
+      setLoading(true);
+      try {
+        const data = await getProductById(productId);
+        setProduct(data);
+      } catch (err) {
+        console.error("Failed to load product details:", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadProduct();
+  }, [productId]);
+
+  const basePrice = product?.basePrice || 1299;
+  const calculatedPrice = Math.round(
+    basePrice * selectedWeight.multiplier + selectedFlavor.price + (isEggless ? 50 : 0)
+  );
 
   const handleAddToCart = () => {
+    if (!product) return;
     addItem({
-      productId: "prod_1", // Placeholder until DB integration
-      name: "Belgian Chocolate Truffle",
-      price: totalPrice,
+      productId: product.id,
+      name: product.name,
+      price: calculatedPrice,
       quantity: 1,
-      image: "https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop",
+      image: product.images,
       flavor: selectedFlavor.label,
-      size: selectedSize.label,
-      message: message,
+      size: selectedWeight.label.split(" ")[0],
+      message: message.trim() || undefined,
     });
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background pt-32 pb-20 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="min-h-screen bg-background pt-32 pb-20">
+        <div className="max-w-4xl mx-auto px-6 text-center">
+          <h2 className="font-serif text-3xl font-bold text-foreground mb-4">Pastry Not Found</h2>
+          <p className="text-muted-foreground mb-8">The cake you are looking for may have sold out or been updated.</p>
+          <Link href="/shop">
+            <Button className="rounded-full">Return to Menu</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-background pt-24 pb-20">
+    <div className="min-h-screen bg-background pt-28 pb-24">
       <div className="max-w-7xl mx-auto px-6">
-        <Link href="/" className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors mb-8">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Shop
+        <Link
+          href="/shop"
+          className="inline-flex items-center text-muted-foreground hover:text-primary transition-colors mb-8 text-sm"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Menu
         </Link>
 
-        <div className="grid md:grid-cols-2 gap-12 lg:gap-20">
-          {/* Image Gallery */}
+        <div className="grid md:grid-cols-2 gap-12 lg:gap-16">
+          {/* Cake Image Display */}
           <div className="space-y-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="aspect-square rounded-3xl overflow-hidden bg-muted relative shadow-lg"
+              className="aspect-square rounded-3xl overflow-hidden bg-muted relative shadow-lg border border-border"
             >
-              <img 
-                src="https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=1000&auto=format&fit=crop" 
-                alt="Chocolate Truffle Cake" 
+              <img
+                src={product.images}
+                alt={product.name}
                 className="w-full h-full object-cover"
               />
+              <span className="absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-background/85 backdrop-blur-md text-foreground shadow-sm">
+                {product.category?.name || "Signature"}
+              </span>
             </motion.div>
-            <div className="grid grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="aspect-square rounded-xl overflow-hidden bg-muted cursor-pointer hover:opacity-80 transition-opacity">
-                   <img 
-                    src="https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=200&auto=format&fit=crop" 
-                    alt="Thumbnail" 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              ))}
+
+            {/* Quality Badges */}
+            <div className="grid grid-cols-3 gap-3 pt-2">
+              <div className="p-3 rounded-2xl bg-muted/40 border border-border/60 text-center">
+                <Truck className="w-5 h-5 mx-auto text-primary mb-1" />
+                <span className="text-[11px] text-muted-foreground block font-medium">Chilled Express</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-muted/40 border border-border/60 text-center">
+                <ShieldCheck className="w-5 h-5 mx-auto text-primary mb-1" />
+                <span className="text-[11px] text-muted-foreground block font-medium">100% Handcrafted</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-muted/40 border border-border/60 text-center">
+                <Sparkles className="w-5 h-5 mx-auto text-primary mb-1" />
+                <span className="text-[11px] text-muted-foreground block font-medium">Pure Ingredients</span>
+              </div>
             </div>
           </div>
 
-          {/* Product Info & Customization */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="flex flex-col"
-          >
-            <div className="flex justify-between items-start mb-2">
-              <h1 className="font-serif text-4xl text-primary">Belgian Chocolate Truffle</h1>
-              <button className="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-primary transition-colors">
-                <Heart className="w-6 h-6" />
-              </button>
-            </div>
-            
-            <div className="flex items-center gap-2 mb-6">
-              <div className="flex items-center text-accent">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Star key={s} className="w-4 h-4 fill-current" />
-                ))}
+          {/* Product Details & Customization Options */}
+          <div className="flex flex-col">
+            <div className="mb-6 border-b border-border/60 pb-6">
+              <h1 className="font-serif text-3xl md:text-5xl font-bold text-foreground mb-3">
+                {product.name}
+              </h1>
+              <p className="text-muted-foreground leading-relaxed text-sm md:text-base">
+                {product.description}
+              </p>
+              <div className="mt-4 flex items-baseline gap-3">
+                <span className="font-serif text-3xl font-bold text-primary">
+                  ₹{calculatedPrice}
+                </span>
+                <span className="text-xs text-muted-foreground">Taxes included • Free delivery above ₹999</span>
               </div>
-              <span className="text-sm text-muted-foreground font-medium">4.9 (128 reviews)</span>
             </div>
 
-            <p className="text-3xl text-primary font-serif mb-6">₹{totalPrice}</p>
-            
-            <p className="text-muted-foreground mb-8 leading-relaxed">
-              Our signature masterpiece. Layers of moist, dark chocolate sponge enveloped in 
-              rich, velvety Belgian chocolate ganache. Freshly baked for every order.
-            </p>
-
-            <div className="space-y-8 flex-1">
-              {/* Flavor Selection */}
+            {/* Customization Form */}
+            <div className="space-y-6 flex-1">
+              {/* Size / Weight Selector */}
               <div>
-                <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">1. Select Flavor</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  {FLAVORS.map((flavor) => (
+                <label className="block text-sm font-semibold text-foreground mb-2 flex items-center justify-between">
+                  <span>Weight / Size</span>
+                  <span className="text-xs text-primary font-normal">{selectedWeight.label}</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {DEFAULT_WEIGHTS.map((w) => (
                     <button
-                      key={flavor.id}
-                      onClick={() => setSelectedFlavor(flavor)}
-                      className={`p-3 rounded-xl border text-sm font-medium transition-all ${
-                        selectedFlavor.id === flavor.id 
-                          ? 'border-primary bg-primary/5 text-primary shadow-sm' 
-                          : 'border-border text-foreground hover:border-primary/30'
+                      key={w.id}
+                      type="button"
+                      onClick={() => setSelectedWeight(w)}
+                      className={`p-3 rounded-2xl text-left border text-xs transition-all ${
+                        selectedWeight.id === w.id
+                          ? "border-primary bg-primary/10 text-foreground font-semibold shadow-sm"
+                          : "border-border bg-card text-muted-foreground hover:border-primary/40"
                       }`}
                     >
-                      {flavor.label} {flavor.price > 0 && <span className="text-muted-foreground text-xs">(+₹{flavor.price})</span>}
+                      {w.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Size Selection */}
+              {/* Flavor Selector */}
               <div>
-                <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">2. Select Weight</h3>
-                <div className="flex flex-wrap gap-3">
-                  {SIZES.map((size) => (
+                <label className="block text-sm font-semibold text-foreground mb-2">
+                  Flavor Selection
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {DEFAULT_FLAVORS.map((f) => (
                     <button
-                      key={size.id}
-                      onClick={() => setSelectedSize(size)}
-                      className={`py-2 px-6 rounded-full border text-sm font-medium transition-all ${
-                        selectedSize.id === size.id 
-                          ? 'border-primary bg-primary text-primary-foreground shadow-md' 
-                          : 'border-border text-foreground hover:border-primary/50 hover:bg-muted'
+                      key={f.id}
+                      type="button"
+                      onClick={() => setSelectedFlavor(f)}
+                      className={`p-3 rounded-2xl text-left border text-xs transition-all ${
+                        selectedFlavor.id === f.id
+                          ? "border-primary bg-primary/10 text-foreground font-semibold shadow-sm"
+                          : "border-border bg-card text-muted-foreground hover:border-primary/40"
                       }`}
                     >
-                      {size.label}
+                      <div className="flex justify-between items-center">
+                        <span>{f.label}</span>
+                        {f.price > 0 && <span className="text-[10px] text-primary">+₹{f.price}</span>}
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Message */}
-              <div>
-                <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">3. Cake Message</h3>
-                <input 
-                  type="text" 
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  placeholder="e.g. Happy Birthday Ananya ❤️" 
-                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+              {/* Eggless Option Toggle */}
+              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-muted/40 border border-border/60">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-3.5 h-3.5 rounded-full border-2 border-emerald-600 flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                  </span>
+                  <div>
+                    <span className="text-xs font-semibold text-foreground block">100% Eggless Preparation</span>
+                    <span className="text-[11px] text-muted-foreground block">Fresh yogurt & condensed milk substitute (+₹50)</span>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isEggless}
+                  onChange={(e) => setIsEggless(e.target.checked)}
+                  className="w-4 h-4 accent-primary rounded cursor-pointer"
                 />
               </div>
 
-              {/* Delivery Details */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Date</h3>
-                  <input 
-                    type="date" 
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground focus:outline-none focus:border-primary transition-all"
-                  />
+              {/* Cake Inscription Message */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-sm font-semibold text-foreground">
+                    Custom Message on Cake (Optional)
+                  </label>
+                  <span className="text-[11px] text-muted-foreground">{message.length}/50 chars</span>
                 </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Time Slot</h3>
-                  <select 
-                    value={timeSlot}
-                    onChange={(e) => setTimeSlot(e.target.value)}
-                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-foreground focus:outline-none focus:border-primary transition-all appearance-none"
-                  >
-                    <option value="" disabled>Select slot</option>
-                    <option value="10-12">10:00 AM - 12:00 PM</option>
-                    <option value="12-14">12:00 PM - 2:00 PM</option>
-                    <option value="14-16">2:00 PM - 4:00 PM</option>
-                    <option value="16-18">4:00 PM - 6:00 PM</option>
-                  </select>
-                </div>
+                <input
+                  type="text"
+                  maxLength={50}
+                  placeholder="e.g. Happy 21st Birthday Shreyan!"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl py-2.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                />
+              </div>
+
+              {/* Add to Cart Button */}
+              <div className="pt-4">
+                <Button
+                  onClick={handleAddToCart}
+                  className="w-full h-12 text-base rounded-full shadow-md gap-2"
+                >
+                  {added ? (
+                    <>
+                      <Check className="w-5 h-5 text-emerald-300" /> Added to Order!
+                    </>
+                  ) : (
+                    <>Add to Bag • ₹{calculatedPrice}</>
+                  )}
+                </Button>
               </div>
             </div>
-
-            <div className="mt-10 pt-8 border-t border-border">
-              <Button 
-                onClick={handleAddToCart}
-                size="lg" 
-                className="w-full rounded-full h-14 text-lg bg-primary hover:bg-primary/90 shadow-xl transition-all"
-              >
-                Add to Cart — ₹{totalPrice}
-              </Button>
-              
-              <div className="flex justify-center gap-8 mt-6 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <Truck className="w-4 h-4" /> Fresh Delivery
-                </div>
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4" /> Secure Payment
-                </div>
-              </div>
-            </div>
-
-          </motion.div>
+          </div>
         </div>
       </div>
     </div>
