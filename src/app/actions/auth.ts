@@ -108,3 +108,47 @@ export async function getUser() {
 
   return user;
 }
+
+export async function loginWithGoogle(profile: {
+  email: string;
+  name: string;
+  avatar?: string;
+}): Promise<ActionResult<{ userId: string }>> {
+  try {
+    const email = profile.email.toLowerCase().trim();
+    let user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          name: profile.name,
+          email,
+          avatar: profile.avatar,
+          role: "CUSTOMER",
+        },
+      });
+    } else if (profile.avatar && !user.avatar) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { avatar: profile.avatar },
+      });
+    }
+
+    const cookieStore = await cookies();
+    cookieStore.set("auth_session", user.id, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+
+    revalidatePath("/");
+    revalidatePath("/my-orders");
+    return { success: true, data: { userId: user.id } };
+  } catch (error) {
+    console.error("[loginWithGoogle] Error:", error);
+    return { success: false, message: "Google authentication failed" };
+  }
+}
